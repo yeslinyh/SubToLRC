@@ -1,196 +1,199 @@
-import re
 import os
+import re
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from datetime import timedelta
 
-# Function to convert ASS subtitle lines to LRC format
-def convert_ass_to_lrc(ass_lines):
-    lrc_lines = []
-    for line in ass_lines:
-        match = re.match(r"Dialogue: \d,([\d:.]+),[\d:.]+,.*?,,\d,\d,\d,,(.+)", line)
-        if match:
-            time_ass = match.group(1)  # Start time in ASS format
-            text = match.group(2).strip()  # Subtitle text
+class SubToLRCApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("SubToLRC")
+        self.root.geometry("400x250")  # 增加窗口高度以适应新控件
 
-            # Convert ASS time (h:mm:ss.cs) to LRC time (mm:ss.cs)
-            h, m, s = map(float, time_ass.split(':'))
-            total_seconds = h * 3600 + m * 60 + s
-            minutes = int(total_seconds // 60)
-            seconds = total_seconds % 60
-            time_lrc = f"[{minutes:02}:{seconds:05.2f}]"
+        # 创建主框架
+        self.main_frame = tk.Frame(self.root, padx=20, pady=20)
+        self.main_frame.pack(expand=True)
 
-            # Append to LRC lines
-            lrc_lines.append(f"{time_lrc}{text}")
+        # 创建标签显示选择的文件夹
+        self.folder_label = tk.Label(self.main_frame, text="未选择文件夹", wraplength=350)
+        self.folder_label.pack(pady=10)
 
-    return "\n".join(lrc_lines)
+        # 创建选择文件夹按钮
+        self.select_button = tk.Button(self.main_frame, text="选择文件夹", command=self.select_folder)
+        self.select_button.pack(pady=5)
 
-# Function to convert SRT subtitle lines to LRC format
-def convert_srt_to_lrc(srt_lines):
-    lrc_lines = []
-    for line in srt_lines:
-        # Match the time format in SRT
-        match = re.match(r"(\d{2}):(\d{2}):(\d{2}),\d{3} --> \d{2}:\d{2}:\d{2},\d{3}", line)
-        if match:
-            h, m, s = map(int, match.groups())
-            total_seconds = h * 3600 + m * 60 + s
-            minutes = total_seconds // 60
-            seconds = total_seconds % 60
-            time_lrc = f"[{minutes:02}:{seconds:05.2f}]"
-            lrc_lines.append(time_lrc)
-        elif line.strip() and not line.isdigit():
-            if lrc_lines:
-                lrc_lines[-1] += line.strip()
-            else:
-                print(f"Warning: Found text without time stamp: {line.strip()}")
+        # 创建时间偏移输入框和标签
+        self.offset_frame = tk.Frame(self.main_frame)
+        self.offset_frame.pack(pady=10)
+        
+        self.offset_label = tk.Label(self.offset_frame, text="第一句歌词开始的时间：")
+        self.offset_label.pack(side=tk.LEFT)
+        
+        self.offset_entry = tk.Entry(self.offset_frame, width=10)
+        self.offset_entry.pack(side=tk.LEFT)
+        self.offset_entry.insert(0, "[00:00.00]")  # 设置默认值
+        
+        # 创建说明标签
+        self.hint_label = tk.Label(self.main_frame, text="格式：[mm:ss.xx]")
+        self.hint_label.pack()
 
-    return "\n".join(lrc_lines)
+        # 创建转换按钮
+        self.convert_button = tk.Button(self.main_frame, text="开始转换", command=self.start_conversion)
+        self.convert_button.pack(pady=10)
+        self.convert_button['state'] = 'disabled'  # 初始状态下禁用
 
-# Function to shift LRC timestamps by a given number of seconds
-def shift_lrc_time(lrc_content, shift_seconds):
-    shifted_lines = []
-    for line in lrc_content.split('\n'):
-        match = re.match(r"\[(\d+):(\d+\.\d+)\](.+)", line)
-        if match:
-            minutes = int(match.group(1))
-            seconds = float(match.group(2))
-            text = match.group(3)
+        # 存储选择的文件夹路径
+        self.folder_path = None
 
-            # Calculate total seconds and apply shift
-            total_seconds = minutes * 60 + seconds - shift_seconds
-
-            # Prevent negative time values
-            if total_seconds < 0:
-                total_seconds = 0
-
-            new_minutes = int(total_seconds // 60)
-            new_seconds = total_seconds % 60
-            new_time = f"[{new_minutes:02}:{new_seconds:05.2f}]"
-
-            # Append shifted line
-            shifted_lines.append(f"{new_time}{text}")
+    def select_folder(self):
+        self.folder_path = filedialog.askdirectory(title="选择文件夹")
+        if self.folder_path:
+            self.folder_label.config(text=f"已选择: {self.folder_path}")
+            self.convert_button['state'] = 'normal'  # 启用转换按钮
         else:
-            shifted_lines.append(line)  # Non-timestamp lines remain unchanged
+            self.folder_label.config(text="未选择文件夹")
+            self.convert_button['state'] = 'disabled'
 
-    return "\n".join(shifted_lines)
-
-# Function to read subtitle file and return lines
-def read_subtitle_file(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            return file.readlines()
-    except FileNotFoundError:
-        print(f"File not found: {file_path}")
-        return []
-    except Exception as e:
-        print(f"Error reading file {file_path}: {e}")
-        return []
-
-# Function to write LRC content to a file
-def write_lrc_file(file_path, content):
-    try:
-        with open(file_path, 'w', encoding='utf-8') as file:
-            file.write(content)
-    except Exception as e:
-        print(f"Error writing to file {file_path}: {e}")
-
-# Function to extract metadata from the file path
-def extract_metadata(file_path):
-    # Get the directories and file name from the path
-    path_parts = os.path.normpath(file_path).split(os.sep)
-    file_name = path_parts[-1].rsplit('.', 1)[0]
-    album = path_parts[-2]
-
-    # Remove the artist part from the album if it contains " - "
-    if ' - ' in album:
-        album = album.split(' - ', 1)[1]
-
-    # Split the file name to get artist and title
-    if ' - ' in file_name:
-        artist, title = file_name.split(' - ', 1)
-    else:
-        raise ValueError(f"File name '{file_name}' does not match the expected format 'Artist - Title.ext'")
-    
-    return artist, title, album
-
-# Function to calculate time shift based on the first line of ASS file and manual offset
-def calculate_time_shift(first_line, manual_offset):
-    match = re.match(r"Dialogue: \d,([\d:.]+),", first_line)
-    if match:
-        time_ass = match.group(1)
-        h, m, s = map(float, time_ass.split(':'))
-        total_seconds = h * 3600 + m * 60 + s
-        return total_seconds - manual_offset
-    else:
-        raise ValueError("The first line does not match the expected format.")
-
-# Function to process subtitle file (ASS or SRT) to LRC and apply time shift
-def process_subtitle_file(subtitle_file, manual_offset):
-    # Read subtitle file
-    subtitle_lines = read_subtitle_file(subtitle_file)
-    if not subtitle_lines:
-        return
-
-    print(f"Read {len(subtitle_lines)} lines from subtitle file: {subtitle_file}")
-
-    # Determine file type and convert to LRC
-    if subtitle_file.endswith('.ass'):
-        try:
-            time_shift = calculate_time_shift(subtitle_lines[0], manual_offset)
-        except ValueError as e:
-            print(e)
+    def start_conversion(self):
+        if not self.folder_path:
+            messagebox.showerror("错误", "请先选择文件夹")
             return
 
-        print(f"Calculated time shift: {time_shift} seconds")
+        # 获取偏移时间
+        offset_str = self.offset_entry.get()
+        if not offset_str:
+            messagebox.showwarning("警告", "请输入偏移时间")
+            return
 
-        lrc_content = convert_ass_to_lrc(subtitle_lines)
-    elif subtitle_file.endswith('.srt'):
-        time_shift = manual_offset  # For SRT, we don't calculate time shift from the content
-        lrc_content = convert_srt_to_lrc(subtitle_lines)
-    else:
-        print(f"Unsupported file type: {subtitle_file}")
-        return
+        # 解析偏移时间
+        offset_match = re.match(r'\[(\d+):(\d+\.\d+)\]', offset_str)
+        if not offset_match:
+            messagebox.showerror("错误", "偏移时间格式错误，请使用[mm:ss.xx]格式")
+            return
+        
+        offset_minutes, offset_seconds = offset_match.groups()
+        offset_time = timedelta(minutes=int(offset_minutes), seconds=float(offset_seconds))
 
-    print("Converted subtitle to LRC:")
-    print(lrc_content)
+        try:
+            # 遍历文件夹中的文件
+            for subdir, _, files in os.walk(self.folder_path):
+                for file in files:
+                    if file.endswith('.ass') or file.endswith('.srt'):
+                        subdir_name = os.path.basename(subdir)
+                        file_path = os.path.join(subdir, file)
+                        self.create_lrc_file(subdir_name, file, file_path, offset_time)
+            
+            messagebox.showinfo("成功", "转换完成！")
+        except Exception as e:
+            messagebox.showerror("错误", f"转换过程中出现错误：\n{str(e)}")
 
-    # Apply time shift
-    shifted_lrc_content = shift_lrc_time(lrc_content, time_shift)
-    print(f"Shifted LRC content by {time_shift} seconds:")
-    print(shifted_lrc_content)
+    def create_lrc_file(self, subdir_name, file_name, file_path, offset_time):
+        # 从文件夹名称提取歌手和专辑信息
+        folder_artist, album = re.match(r'(.+?) - (\d+ .+)', subdir_name).groups()
+        # 从文件名提取歌手和歌曲标题
+        file_artist, song_title = re.match(r'(.+?) - (.+)\.(ass|srt)', file_name).groups()[:2]
+        
+        # 创建LRC文件头部信息
+        lrc_content = (
+            f"[ti:{song_title}]\n"
+            f"[ar:{folder_artist}]\n"
+            f"[al:{album}]\n"
+            f"[by:SubToLRC]\n"
+            f"[00:00.00]{file_artist} - {song_title}\n"
+        )
 
-    # Extract metadata
-    try:
-        artist, title, album = extract_metadata(subtitle_file)
-    except ValueError as e:
-        print(e)
-        return
+        # 根据文件类型选择相应的解析方法
+        if file_name.endswith('.ass'):
+            lrc_content += self.parse_ass_file(file_path, offset_time)
+        elif file_name.endswith('.srt'):
+            lrc_content += self.parse_srt_file(file_path, offset_time)
 
-    # Add metadata to the beginning of the LRC content
-    metadata = f"[ti:{title}]\n[ar:{artist}]\n[al:{album}]\n[by:convert-lrc]\n[00:00.00]{artist} - {title}\n"
-    final_lrc_content = metadata + shifted_lrc_content
+        # 生成LRC文件
+        lrc_file_path = os.path.join(os.path.dirname(file_path), f"{os.path.splitext(file_name)[0]}.lrc")
+        with open(lrc_file_path, 'w', encoding='utf-8') as lrc_file:
+            lrc_file.write(lrc_content)
 
-    # Generate LRC file path
-    lrc_file = os.path.splitext(subtitle_file)[0] + ".lrc"
+    def parse_ass_file(self, file_path, offset_time):
+        lrc_lines = []
+        seen_lines = set()
+        first_timestamp = None
+        
+        # 第一遍读取，获取第一个时间戳
+        with open(file_path, 'r', encoding='utf-8-sig') as file:
+            for line in file:
+                match = re.match(r'Dialogue: \d,(\d+):(\d+):([\d.]+),\d+:\d+:\d+.\d+,Default,,\d,\d,\d,,(.+)', line)
+                if match:
+                    hours, minutes, seconds, _ = match.groups()
+                    first_timestamp = timedelta(hours=int(hours), minutes=int(minutes), seconds=float(seconds))
+                    break
 
-    # Write LRC content to file
-    write_lrc_file(lrc_file, final_lrc_content)
-    print(f"LRC file saved to: {lrc_file}")
+        # 第二遍读取，处理所有行
+        with open(file_path, 'r', encoding='utf-8-sig') as file:
+            for line in file:
+                match = re.match(r'Dialogue: \d,(\d+):(\d+):([\d.]+),\d+:\d+:\d+.\d+,Default,,\d,\d,\d,,(.+)', line)
+                if match:
+                    hours, minutes, seconds, text = match.groups()
+                    current_time = timedelta(hours=int(hours), minutes=int(minutes), seconds=float(seconds))
+                    # 计算相对时间并添加偏移
+                    time_diff = current_time - first_timestamp + offset_time
+                    # 转换为分钟和秒
+                    total_seconds = time_diff.total_seconds()
+                    minutes, seconds = divmod(total_seconds, 60)
+                    # 生成时间标签
+                    time_tag = f"[{int(minutes):02}:{seconds:05.2f}]"
+                    line_content = f"{time_tag}{text.strip()}"
+                    
+                    if line_content not in seen_lines:
+                        lrc_lines.append(line_content)
+                        seen_lines.add(line_content)
+        
+        return '\n'.join(sorted(lrc_lines)) + '\n'
 
-# Function to find all .ass and .srt files in the current directory and process them
-def find_and_process_subtitle_files(manual_offset):
-    # Get the current directory
-    current_dir = os.getcwd()
-    print(f"Current directory: {current_dir}")
-    # Traverse the directory tree
-    for root, dirs, files in os.walk(current_dir):
-        for file in files:
-            if file.endswith('.ass') or file.endswith('.srt'):
-                subtitle_file_path = os.path.join(root, file)
-                print(f"Processing file: {subtitle_file_path}")
-                process_subtitle_file(subtitle_file_path, manual_offset)
+    def parse_srt_file(self, file_path, offset_time):
+        lrc_lines = []
+        first_timestamp = None
 
-# Example usage
+        # 第一遍读取，获取第一个时间戳
+        with open(file_path, 'r', encoding='utf-8-sig') as file:
+            for line in file:
+                time_match = re.match(r'(\d+):(\d+):(\d+),(\d+) --> \d+:\d+:\d+,\d+', line)
+                if time_match:
+                    hours, minutes, seconds, milliseconds = time_match.groups()
+                    first_timestamp = timedelta(
+                        hours=int(hours),
+                        minutes=int(minutes),
+                        seconds=int(seconds),
+                        milliseconds=int(milliseconds)
+                    )
+                    break
+
+        # 第二遍读取，处理所有行
+        with open(file_path, 'r', encoding='utf-8-sig') as file:
+            time_tag = ''
+            for line in file:
+                time_match = re.match(r'(\d+):(\d+):(\d+),(\d+) --> \d+:\d+:\d+,\d+', line)
+                if time_match:
+                    hours, minutes, seconds, milliseconds = time_match.groups()
+                    current_time = timedelta(
+                        hours=int(hours),
+                        minutes=int(minutes),
+                        seconds=int(seconds),
+                        milliseconds=int(milliseconds)
+                    )
+                    # 计算相对时间并添加偏移
+                    time_diff = current_time - first_timestamp + offset_time
+                    # 转换为分钟和秒
+                    total_seconds = time_diff.total_seconds()
+                    minutes, seconds = divmod(total_seconds, 60)
+                    time_tag = f"[{int(minutes):02}:{seconds:05.2f}]"
+                elif line.strip() and not line.isdigit():
+                    if time_tag:
+                        lrc_lines.append(f"{time_tag}{line.strip()}")
+                        time_tag = ''
+
+        return '\n'.join(sorted(lrc_lines)) + '\n'
+
 if __name__ == "__main__":
-    # Set manual offset in seconds
-    manual_offset = 1
-
-    # Find and process all .ass and .srt files in the current directory and subdirectories
-    find_and_process_subtitle_files(manual_offset)
+    root = tk.Tk()
+    app = SubToLRCApp(root)
+    root.mainloop()
